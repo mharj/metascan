@@ -1,11 +1,11 @@
 [package]
 name = "metascan"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "High-performance parallel posix filesystem metadata scanner"
 license = "MIT"
-repository = "https://github.com/mharj/greedy_rs"
-homepage = "https://github.com/mharj/greedy_rs"
+repository = "https://github.com/mharj/metascan"
+homepage = "https://github.com/mharj/metascan"
 authors = ["Marko Harjula <mharj@github.com>"]
 keywords = ["filesystem", "posix", "scanner", "metadata", "parallel"]
 categories = ["command-line-utilities", "filesystem", "security"]
