@@ -8,7 +8,7 @@ repository = "https://github.com/mharj/greedy_rs"
 homepage = "https://github.com/mharj/greedy_rs"
 authors = ["Marko Harjula <mharj@github.com>"]
 keywords = ["filesystem", "posix", "scanner", "metadata", "parallel"]
-categories = ["command-line-utilities", "filesystem", "data-processing"]
+categories = ["command-line-utilities", "filesystem", "security"]
 readme = "README.md"
 
 [[bin]]
