@@ -1,4 +1,4 @@
-# greedy - Fast Posix File Metadata Scanner
+# metascan - Fast Posix File Metadata Scanner
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
 [![Publish to crates.io](https://github.com/mharj/greedy_rs/actions/workflows/release.yml/badge.svg)](https://github.com/mharj/greedy_rs/actions/workflows/release.yml)
@@ -31,24 +31,24 @@ Output is JSON-formatted, designed for database ingestion and further analysis.
 cargo build --release
 ```
 
-Static musl binary: `target/x86_64-unknown-linux-musl/release/greedy`
+Static musl binary: `target/x86_64-unknown-linux-musl/release/metascan`
 
 ## Usage
 
 ### Basic scan
 ```bash
-sudo ./greedy /path/to/scan
+sudo ./metascan /path/to/scan
 ```
 
 ### With config file
 ```bash
-sudo ./greedy -c config.json /path/to/scan
+sudo ./metascan -c config.json /path/to/scan
 ```
 
 ### Override thread count
 ```bash
-sudo ./greedy -threads 32 /path/to/scan
-sudo ./greedy -c config.json -threads 8 /path/to/scan
+sudo ./metascan -threads 32 /path/to/scan
+sudo ./metascan -c config.json -threads 8 /path/to/scan
 ```
 
 ### Config file (config.json)
@@ -64,8 +64,8 @@ CLI args override config values.
 ## Library Usage
 
 ```rust
-use greedy::models::Config;
-use greedy::scanner::scan_directory;
+use metascan::models::Config;
+use metascan::scanner::scan_directory;
 
 let config = Config::from_file("config.json")?;
 let output = scan_directory("/project_xyz", Some(&config))?;

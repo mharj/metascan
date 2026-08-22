@@ -1,5 +1,5 @@
 [package]
-name = "greedy"
+name = "metascan"
 version = "0.0.1"
 edition = "2021"
 description = "High-performance parallel posix filesystem metadata scanner"
@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "filesystem", "data-processing"]
 readme = "README.md"
 
 [[bin]]
-name = "greedy"
+name = "metascan"
 path = "src/main.rs"
 
 [dependencies]

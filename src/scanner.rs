@@ -194,8 +194,8 @@ pub fn scan_parallel(
 /// # Example
 ///
 /// ```no_run
-/// use greedy::scanner::scan_directory;
-/// use greedy::models::Config;
+/// use metascan::scanner::scan_directory;
+/// use metascan::models::Config;
 ///
 /// let output = scan_directory("/project_xyz", None)?;
 /// println!("Files: {}", output.all.files);

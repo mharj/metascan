@@ -6,8 +6,8 @@
 //! # Example
 //!
 //! ```no_run
-//! use greedy::models::Config;
-//! use greedy::scanner::scan_directory;
+//! use metascan::models::Config;
+//! use metascan::scanner::scan_directory;
 //!
 //! let config = Config::from_file("config.json")?;
 //! let output = scan_directory("/path/to/scan", Some(&config))?;
