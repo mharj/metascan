@@ -3,7 +3,21 @@ on:
   push:
     branches: ['**']
     tags: ['v*']
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'src/**'
+      - '.github/workflows/release.yml'
+      - 'README.md'
+      - '.cargo/config.toml'
   pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'src/**'
+      - '.github/workflows/release.yml'
+      - 'README.md'
+      - '.cargo/config.toml'
   
 jobs:
   build-release-assets:
