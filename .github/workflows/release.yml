@@ -1,0 +1,30 @@
+name: Publish to crates.io
+on:
+  push:
+    tags: ['v*']  # Triggers when pushing tags starting with 'v'
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release  # Optional: for enhanced security
+    permissions:
+      id-token: write     # Required for OIDC token exchange
+    env:
+      TARGET_TRIPLE: x86_64-unknown-linux-musl
+      BIN_NAME: greedy
+    steps:
+    - uses: actions/checkout@v6
+    - name: Build
+      run: cargo build --release --target "$TARGET_TRIPLE" --verbose
+    - name: Prepare release asset name
+      run: |
+        ARCH="${TARGET_TRIPLE%%-*}"
+        mkdir -p dist
+        cp "target/$TARGET_TRIPLE/release/$BIN_NAME" "dist/$BIN_NAME.$ARCH"
+    - uses: softprops/action-gh-release@v3
+      with:
+        files: dist/*
+    - uses: rust-lang/crates-io-auth-action@v1
+      id: auth
+    - run: cargo publish
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
