@@ -1,6 +1,7 @@
 # greedy - Fast Posix File Metadata Scanner
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#)
+[![Publish to crates.io](https://github.com/mharj/greedy_rs/actions/workflows/release.yml/badge.svg)](https://github.com/mharj/greedy_rs/actions/workflows/release.yml)
 
 A high-performance, parallel directory scanner that generates detailed filesystem metadata for large-scale analysis. Optimized for terabyte-scale datasets and millions of files.
 
