@@ -19,7 +19,8 @@ Output is JSON-formatted, designed for database ingestion and further analysis.
 ## Key Features
 
 - **Parallel scanning** with configurable thread count
-- **Static binary** (musl-compiled) with zero external dependencies
+- **Portable GNU build by default** for faster runtime on many Linux systems
+- **Optional static binary** (musl-compiled) for single-file deployment
 - **Low memory footprint** via streaming aggregation
 - **Configurable excludes** to skip loopback mounts (.snapshot, etc.)
 - **Config file support** with CLI overrides
@@ -27,11 +28,27 @@ Output is JSON-formatted, designed for database ingestion and further analysis.
 
 ## Build
 
+Default Linux release build (GNU target):
+
 ```bash
 cargo build --release
 ```
 
+GNU binary: `target/release/metascan`
+
+Static musl release build:
+
+```bash
+cargo build-musl
+```
+
 Static musl binary: `target/x86_64-unknown-linux-musl/release/metascan`
+
+Explicit GNU release build alias:
+
+```bash
+cargo build-gnu
+```
 
 ## Usage
 
@@ -51,10 +68,12 @@ sudo ./metascan -threads 32 /path/to/scan
 sudo ./metascan -c config.json -threads 8 /path/to/scan
 ```
 
+Default thread count uses detected CPU parallelism, clamped to 1..16.
+
 ### Config file (config.json)
 ```json
 {
-  "threads": 16,
+  "threads": 8,
   "excludes": [".snapshot"]
 }
 ```

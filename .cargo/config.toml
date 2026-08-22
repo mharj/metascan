@@ -1,2 +1,6 @@
-[build]
-target = "x86_64-unknown-linux-musl"
+[alias]
+build-gnu = "build --release --target x86_64-unknown-linux-gnu"
+build-musl = "build --release --target x86_64-unknown-linux-musl"
+
+[env]
+CC_x86_64_unknown_linux_musl = "musl-gcc"

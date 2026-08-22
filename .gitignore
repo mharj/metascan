@@ -22,3 +22,8 @@ target
 
 # ignore dist
 dist
+
+# flamegraph
+flamegraph.svg
+perf.data
+perf.data.old

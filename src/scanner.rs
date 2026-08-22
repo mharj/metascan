@@ -1,17 +1,22 @@
 use crate::models::{Config, Output, ScanResult, Stats};
-use std::collections::VecDeque;
+use crossbeam_deque::{Injector, Steal, Stealer, Worker};
+use std::collections::HashSet;
+use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Default)]
-struct QueueState {
-    queue: VecDeque<PathBuf>,
-    active: usize,
-    closed: bool,
+pub fn default_thread_count() -> u32 {
+    // Clamp default workers to avoid oversubscription and lock/allocator contention.
+    // On NFS-heavy workloads, 16 workers is often a practical saturation point.
+    std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(16)
+        .clamp(1, 16)
 }
 
 fn now_unix() -> i64 {
@@ -21,16 +26,22 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
+fn year_bucket(mtime: i64, now: i64) -> i64 {
+    let delta = (now - mtime) as f64;
+    let seconds_in_year = 31_536_000.0;
+    (delta / seconds_in_year).floor() as i64
+}
+
 fn scan_one_dir(
     dir: &PathBuf,
     now: i64,
-    excludes: &Option<Vec<String>>,
+    excludes: &Option<HashSet<OsString>>,
 ) -> (ScanResult, Vec<PathBuf>) {
     let mut local = ScanResult {
         permission_ok: true,
         ..ScanResult::default()
     };
-    let mut discovered = Vec::new();
+    let mut discovered = Vec::with_capacity(32);
     // Attempt to read the directory entries; if it fails, mark permission as not okay and return
     let entries = match fs::read_dir(dir) {
         Ok(rd) => rd,
@@ -49,22 +60,38 @@ fn scan_one_dir(
             }
         };
 
-        // Skip files matching exclude patterns (filename-based)
-        if let Some(filename_str) = entry.file_name().to_str() {
-            if let Some(exclude_list) = excludes {
-                if exclude_list.iter().any(|pattern| filename_str == pattern) {
-                    continue;
-                }
+        if let Some(exclude_set) = excludes.as_ref() {
+            let entry_name = entry.file_name();
+            if exclude_set.contains(&entry_name) {
+                continue;
             }
         }
 
-        let path = entry.path();
-
-        let st = match fs::symlink_metadata(&path) {
-            Ok(s) => s,
+        let entry_type = match entry.file_type() {
+            Ok(t) => t,
             Err(_) => {
                 local.permission_ok = false;
                 continue;
+            }
+        };
+
+        // For non-symlinks, use entry.metadata() to avoid path reconstruction.
+        let st = if entry_type.is_symlink() {
+            let path = entry.path();
+            match fs::symlink_metadata(&path) {
+                Ok(s) => s,
+                Err(_) => {
+                    local.permission_ok = false;
+                    continue;
+                }
+            }
+        } else {
+            match entry.metadata() {
+                Ok(s) => s,
+                Err(_) => {
+                    local.permission_ok = false;
+                    continue;
+                }
             }
         };
 
@@ -76,14 +103,12 @@ fn scan_one_dir(
         local.per_gid.entry(gid).or_default().add_meta(&st, now);
 
         let mtime = st.mtime();
-        let delta = (now - mtime) as f64;
-        let seconds_in_year = 31_536_000.0;
-        let bucket = (delta / seconds_in_year).floor() as i64;
+        let bucket = year_bucket(mtime, now);
         let year_entry = local.year.entry(bucket).or_insert(0);
         *year_entry = year_entry.saturating_add(st.size());
 
-        if st.file_type().is_dir() {
-            discovered.push(path);
+        if entry_type.is_dir() {
+            discovered.push(entry.path());
         }
     }
 
@@ -95,75 +120,114 @@ pub fn scan_parallel(
     thread_count: u32,
     excludes: Option<Vec<String>>,
 ) -> ScanResult {
-    let workers = thread_count.max(1) as usize;
-    let excludes = Arc::new(excludes);
+    const LOCAL_BATCH_MAX: usize = 32;
+    const STEAL_INTERVAL: usize = 8;
+    const EMPTY_SPIN_LIMIT: usize = 64;
 
-    // Create shared thread-safe state: work queue protected by mutex and condition variable for worker coordination
-    let shared = Arc::new((
-        Mutex::new(QueueState {
-            queue: {
-                let mut q = VecDeque::new();
-                q.push_back(root);
-                q
-            },
-            active: 0,
-            closed: false,
-        }),
-        Condvar::new(),
-    ));
+    let workers = thread_count.max(1) as usize;
+    let scan_now = now_unix();
+    let excludes = Arc::new(excludes.map(|list| {
+        list.into_iter()
+            .map(OsString::from)
+            .collect::<HashSet<_>>()
+    }));
+
+    let injector = Arc::new(Injector::new());
+    injector.push(root);
+    let outstanding = Arc::new(AtomicUsize::new(1));
+
+    let local_queues: Vec<Worker<PathBuf>> =
+        (0..workers).map(|_| Worker::new_fifo()).collect();
+    let stealers: Vec<Stealer<PathBuf>> = local_queues.iter().map(Worker::stealer).collect();
 
     let mut handles = Vec::with_capacity(workers);
 
-    for _ in 0..workers {
-        // Clone the Arc to share ownership of the queue state with each worker thread
-        let shared_state = Arc::clone(&shared);
+    for (worker_index, local) in local_queues.into_iter().enumerate() {
+        let injector_clone = Arc::clone(&injector);
+        let outstanding_clone = Arc::clone(&outstanding);
         let excludes_clone = Arc::clone(&excludes);
-        // Spawn a new worker thread
+        let stealers_clone = stealers.clone();
+        let scan_now_copy = scan_now;
+
         handles.push(thread::spawn(move || {
-            // Each worker thread maintains its own local ScanResult accumulator
             let mut local_acc = ScanResult {
                 permission_ok: true,
                 ..ScanResult::default()
             };
-            // Worker thread loop: continuously process directories from the queue until it's closed
+            let mut empty_streak = 0usize;
+            let mut batch = Vec::with_capacity(LOCAL_BATCH_MAX);
+
             loop {
-                let dir = {
-                    let (lock, cvar) = &*shared_state;
-                    let mut state = lock.lock().expect("queue lock poisoned");
+                let dir = if let Some(d) = local.pop() {
+                    Some(d)
+                } else {
+                    let mut found = match injector_clone.steal_batch_and_pop(&local) {
+                        Steal::Success(d) => Some(d),
+                        Steal::Retry | Steal::Empty => None,
+                    };
 
-                    loop {
-                        if let Some(d) = state.queue.pop_front() {
-                            state.active += 1;
-                            break d;
+                    if found.is_none() && empty_streak % STEAL_INTERVAL == 0 {
+                        let victim_offset = worker_index.wrapping_add(empty_streak);
+                        for idx in 0..stealers_clone.len() {
+                            let victim = (victim_offset + idx) % stealers_clone.len();
+                            if victim == worker_index {
+                                continue;
+                            }
+                            match stealers_clone[victim].steal_batch_and_pop(&local) {
+                                Steal::Success(d) => {
+                                    found = Some(d);
+                                    break;
+                                }
+                                Steal::Retry | Steal::Empty => continue,
+                            }
                         }
-
-                        if state.closed {
-                            return local_acc;
-                        }
-
-                        state = cvar.wait(state).expect("queue wait poisoned");
                     }
+
+                    found
                 };
 
-                let (scan_result, discovered) = scan_one_dir(&dir, now_unix(), &*excludes_clone);
-                local_acc.merge(&scan_result);
+                let Some(dir) = dir else {
+                    if outstanding_clone.load(Ordering::Acquire) == 0 {
+                        break;
+                    }
 
-                let (lock, cvar) = &*shared_state;
-                let mut state = lock.lock().expect("queue lock poisoned");
+                    empty_streak = empty_streak.saturating_add(1);
+                    if empty_streak <= EMPTY_SPIN_LIMIT {
+                        std::hint::spin_loop();
+                    } else {
+                        thread::yield_now();
+                    }
+                    continue;
+                };
 
-                for d in discovered {
-                    state.queue.push_back(d);
+                empty_streak = 0;
+                batch.clear();
+                batch.push(dir);
+
+                while batch.len() < LOCAL_BATCH_MAX {
+                    match local.pop() {
+                        Some(next) => batch.push(next),
+                        None => break,
+                    }
                 }
 
-                state.active = state.active.saturating_sub(1);
+                for batch_dir in batch.drain(..) {
+                    let (scan_result, discovered) =
+                        scan_one_dir(&batch_dir, scan_now_copy, &*excludes_clone);
+                    local_acc.merge(&scan_result);
 
-                if state.queue.is_empty() && state.active == 0 {
-                    state.closed = true;
-                    cvar.notify_all();
-                } else if !state.queue.is_empty() {
-                    cvar.notify_all();
+                    outstanding_clone.fetch_add(discovered.len(), Ordering::AcqRel);
+                    for d in discovered {
+                        local.push(d);
+                    }
+
+                    if outstanding_clone.fetch_sub(1, Ordering::AcqRel) == 1 {
+                        return local_acc;
+                    }
                 }
             }
+
+            local_acc
         }));
     }
     // Wait for all worker threads to finish and collect their results
@@ -212,7 +276,9 @@ pub fn scan_directory<P: AsRef<Path>>(path: P, config: Option<&Config>) -> Resul
         return Err(format!("Permission denied: {}", target.display()));
     }
 
-    let threads = config.and_then(|c| c.threads).unwrap_or(16);
+    let threads = config
+        .and_then(|c| c.threads)
+        .unwrap_or_else(default_thread_count);
     let excludes = config.and_then(|c| c.excludes.clone());
 
     let start = SystemTime::now();
