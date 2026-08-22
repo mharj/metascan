@@ -46,7 +46,7 @@ jobs:
         mkdir -p dist
         cp "target/$TARGET/release/$BIN_NAME" "dist/$BIN_NAME.$ARCH"_${{ matrix.asset_suffix }}
     - name: Upload release asset artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: release-assets-${{ matrix.flavor }}
         path: dist/*
