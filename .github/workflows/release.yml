@@ -8,6 +8,8 @@ jobs:
     environment: release  # Optional: for enhanced security
     permissions:
       id-token: write     # Required for OIDC token exchange
+      contents: write
+      pull-requests: write
     env:
       TARGET_TRIPLE: x86_64-unknown-linux-musl
       BIN_NAME: greedy
